@@ -10,12 +10,18 @@ LOGIN_MAIL = '#login_user_form input[type="email"]'
 LOGIN_PASS = '#login_user_form input[type="password"]'
 LOGIN_BTN = '#login-button'
 FOOD_NAV = 'a[href="#foods"]'
+CLOSE_GOLD = 'body > div:nth-child(15) > div > div > div.titlebar > div.titlebar-cancelbox'
 FOOD_SEARCH = "//div[text()='Search Foods']"
 FOOD_SRC_BTN = "//button[text()='+ Search Foods']"
 SRC_INPUT = "body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(1) > div > div > input"
 SRC_BTN = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(1) > div > button'
 SRC_SETTING_BTN = "body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(1) > div > img.GL-TVABCMYB"
 SRC_SETTING_SELECT = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(2) > table > tbody > tr > td:nth-child(2) > div > select'
+SRC_TABLE_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div.GL-TVABCE-B > div > div > div > table > tbody'
+SRC_TABLE_FIRST_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div.GL-TVABCE-B > div > div > div > table > tbody > tr:nth-child(2)'
+SRC_TABLE_ALL_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div.GL-TVABCE-B > div > div > div > table > tbody > tr:nth-child(n+1)'
+SRC_TABLE_COL_NAME = 'td:nth-child(1) > div'
+SRC_BTN_VIEW_RESULT = 'body > div.prettydialog > div > div > table > tbody > tr > td:nth-child(2) > button'
 
 
 async def login(page):
@@ -49,21 +55,40 @@ async def search(page, text_search):
 
     # Set source to nccdb
     settings_button = await page.querySelector(SRC_SETTING_BTN)
-    settings_button.click()
+    await settings_button.click()
     await page.waitForSelector(SRC_SETTING_SELECT)
     await page.select(SRC_SETTING_SELECT, 'NCCDB')
 
     # Start search
-    await search_bar.type("banana")
+    await search_bar.type(text_search)
     await button.click()
 
 
+async def getResults(page):
+    await page.waitForSelector(SRC_TABLE_FIRST_RESULT)
+    elements = await page.querySelectorAll(SRC_TABLE_ALL_RESULT)
+    all_names = []
+    for e in elements:
+        div = await e.querySelector(SRC_TABLE_COL_NAME)
+        val = await page.evaluate("el => el.textContent", div)
+        if val != "Description":
+            all_names.append(val)
+    return all_names
+
+
+async def viewResult(page, result):
+    selector = "//div[text()='"+result+"']"
+    elem = await page.xpath(selector)
+    btn = await page.querySelector(SRC_BTN_VIEW_RESULT)
+    await elem[0].click()
+    await btn.click()
+
+
 async def checkGold(page):
-    close_selector = 'body > div:nth-child(15) > div > div > div.titlebar > div.titlebar-cancelbox'
     try:
-        await page.waitForSelector(close_selector, {"timeout": 500})
+        await page.waitForSelector(CLOSE_GOLD, {"timeout": 500})
         print("Close GOLD")
-        close_button = await page.querySelector(close_selector)
+        close_button = await page.querySelector(CLOSE_GOLD)
         await close_button.click()
     except TimeoutError:
         pass
@@ -84,6 +109,10 @@ async def main():
     await checkGold(page)
     await search(page, "banana")
     await checkGold(page)
+    all_results = await getResults(page)
+    await checkGold(page)
+    await viewResult(page, all_results[0])
+
     breakpoint()
     
     await browser.close()
