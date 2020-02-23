@@ -2,56 +2,88 @@
 
 import asyncio
 from pyppeteer import launch
+from pyppeteer.errors import TimeoutError
+
+
+URL = 'https://cronometer.com/login/'
+LOGIN_MAIL = '#login_user_form input[type="email"]'
+LOGIN_PASS = '#login_user_form input[type="password"]'
+LOGIN_BTN = '#login-button'
+FOOD_NAV = 'a[href="#foods"]'
+FOOD_SEARCH = "//div[text()='Search Foods']"
+FOOD_SRC_BTN = "//button[text()='+ Search Foods']"
+SRC_INPUT = "body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(1) > div > div > input"
+SRC_BTN = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(1) > div > button'
+SRC_SETTING_BTN = "body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(1) > div > img.GL-TVABCMYB"
+SRC_SETTING_SELECT = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(2) > table > tbody > tr > td:nth-child(2) > div > select'
+
+
+async def login(page):
+    await page.goto(URL)
+    await page.type(LOGIN_MAIL, 'realitix@gmail.com')
+    await page.type(LOGIN_PASS, 'wawa8900')
+    await page.click(LOGIN_BTN)
+
+
+async def goToFoodNav(page):
+    await page.waitForSelector(FOOD_NAV)
+    await page.click(FOOD_NAV)
+
+
+async def goToFoodSearch(page):
+    await page.waitForXPath(FOOD_SEARCH)
+    link = await page.xpath(FOOD_SEARCH)
+    await link[0].click()
+
+
+async def openSearchBox(page):
+    await page.waitForXPath(FOOD_SRC_BTN)
+    link = await page.xpath(FOOD_SRC_BTN)
+    await link[0].click()
+
+
+async def search(page, text_search):
+    await page.waitForSelector(SRC_INPUT)
+    search_bar = await page.querySelector(SRC_INPUT)
+    button = await page.querySelector(SRC_BTN)
+
+    # Set source to nccdb
+    settings_button = await page.querySelector(SRC_SETTING_BTN)
+    settings_button.click()
+    await page.waitForSelector(SRC_SETTING_SELECT)
+    await page.select(SRC_SETTING_SELECT, 'NCCDB')
+
+    # Start search
+    await search_bar.type("banana")
+    await button.click()
+
+
+async def checkGold(page):
+    close_selector = 'body > div:nth-child(15) > div > div > div.titlebar > div.titlebar-cancelbox'
+    try:
+        await page.waitForSelector(close_selector, {"timeout": 500})
+        print("Close GOLD")
+        close_button = await page.querySelector(close_selector)
+        await close_button.click()
+    except TimeoutError:
+        pass
 
 
 async def main():
-    browser = await launch(headless=False)
+    browser = await launch(headless=False, args=["--start-maximized"])
     page = await browser.newPage()
+    await page.setViewport({'width':0, 'height':0});
 
-    # Login
-    await page.goto('https://cronometer.com/login/')
-    await page.type('#login_user_form input[type="email"]', 'realitix@gmail.com')
-    await page.type('#login_user_form input[type="password"]', 'wawa8900')
-    await page.click('#login-button')
-    await page.waitForSelector('a[href="#foods"]')
-
-    # Go to food nav
-    await page.click('a[href="#foods"]')
-
-    # Go to food search
-    await page.waitForXPath("//div[text()='Search Foods']")
-    link = await page.xpath("//div[contains(text(), 'Search Foods')]")
-    await link[0].click()
-
-    # Click on + Search Foods
-    await page.waitForXPath("//button[text()='+ Search Foods']")
-    link = await page.xpath("//button[text()='+ Search Foods']")
-    await link[0].click()
-
-    # Retrieve search bar
-    await page.waitForSelector('img[src="https://cdn1.cronometer.com/pix/search_magnifier_v2.png"]')
-    img_search = await page.querySelector('img[src="https://cdn1.cronometer.com/pix/search_magnifier_v2.png"]')
-    search_bar = await page.evaluateHandle("el => el.nextElementSibling", img_search)
-
-    # Retrieve searchbar button
-    button_search_bar = await page.evaluateHandle("el => el.parentElement.nextElementSibling.nextElementSibling", search_bar)
-
-    # Retrieve searchbar settings button
-    search_bar_settings = await page.evaluateHandle("el => el.nextElementSibling", button_search_bar)
-
-    # Click on settings
-    await search_bar_settings.click()
-
-    # Set source to nccdb
-    select_selector = 'body > div.prettydialog > div > div > div.GL-TVABCPYB > div:nth-child(2) > table > tbody > tr > td:nth-child(2) > div > select'
-    await page.waitForSelector(select_selector)
-    await page.select(select_selector, 'NCCDB')
-
-    # Write in search bar
-    await search_bar.type("banana")
-
-    # Click on button
-    await button_search_bar.click()
+    await login(page)
+    await checkGold(page)
+    await goToFoodNav(page)
+    await checkGold(page)
+    await goToFoodSearch(page)
+    await checkGold(page)
+    await openSearchBox(page)
+    await checkGold(page)
+    await search(page, "banana")
+    await checkGold(page)
     breakpoint()
     
     await browser.close()
