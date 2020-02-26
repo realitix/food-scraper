@@ -278,7 +278,7 @@ def find_max_aliments(aliments_in):
 
     print(f"Aliments left: {len(stills_alim)}")
 
-    # Start the process
+    # Start the search process
     _patch_pyppeteer()
     
     if len(stills_alim) > 0:
@@ -288,7 +288,18 @@ def find_max_aliments(aliments_in):
         consumers = [consume_aliment_to_search(queue) for _ in range(NB_PROCESS)]
         loop.run_until_complete(asyncio.gather(producer, *consumers))
         loop.close()
+    
 
+def get_aliments_to_retrieve():
+    aliments_src = listdir(path.join(HERE, 'cache', 'step1'))
+    results = set()
+    for a in aliments_src:
+        with open(path.join(HERE, 'cache', 'step1', a), "r") as f:
+            for l in f.readlines():
+                results.add(l)
+
+    print(f"{len(results)} aliments to retrieve")
+    return results
 
 
 async def test():

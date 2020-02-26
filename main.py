@@ -7,6 +7,7 @@ def main():
     #breakpoint()
     list_aliment_in = get_all_aliments_in()
     find_max_aliments(list_aliment_in)
+    aliments_to_retrieve = get_aliments_to_retrieve()
     
 
 
