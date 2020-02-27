@@ -1,13 +1,16 @@
 import xmltodict
+import json
 from os import path
 from os import listdir
 import asyncio
 from pyppeteer import launch
 from pyppeteer.errors import TimeoutError, NetworkError
+import selector as s
 
 HERE = path.dirname(path.abspath(__file__))
 
-NB_PROCESS = 10
+NB_PROCESS = 1
+WINDOW = True
 
 URL_HOME = 'https://cronometer.com'
 URL_LOGIN = 'https://cronometer.com/login/'
@@ -18,9 +21,7 @@ FOOD_NAV = 'a[href="#foods"]'
 CLOSE_GOLD = 'body > div:nth-child(15) > div > div > div.titlebar > div.titlebar-cancelbox'
 FOOD_SEARCH = "//div[text()='Search Foods']"
 FOOD_SRC_BTN = "//button[text()='+ Search Foods']"
-SRC_INPUT = "body > div.prettydialog > div > div > div.GL-TVABCNYB > div:nth-child(1) > div > div > input"
-SRC_BTN = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div:nth-child(1) > div > button'
-SRC_SETTING_BTN = "body > div.prettydialog > div > div > div.GL-TVABCNYB > div:nth-child(1) > div > img.GL-TVABCKYB"
+SRC_IMG = "img[src='https://cdn1.cronometer.com/pix/search_magnifier_v2.png']"
 SRC_SETTING_SELECT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div:nth-child(2) > table > tbody > tr > td:nth-child(2) > div > select'
 SRC_TABLE_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody'
 SRC_TABLE_FIRST_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody > tr:nth-child(2)'
@@ -28,9 +29,14 @@ SRC_TABLE_ALL_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > 
 SRC_TABLE_COL_NAME = 'td:nth-child(1) > div'
 SRC_BTN_VIEW_RESULT = 'body > div.prettydialog > div > div > table > tbody > tr > td:nth-child(2) > button'
 SRC_LOADING_IMG = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div:nth-child(1) > div > img.GL-TVABCK-B'
+SRC_GOTO_ALIMENT = 'body > div.prettydialog > div > div > table > tbody > tr > td:nth-child(2) > button'
+
+# Food detail
+GLOBAL_GOOD_DETAIL = '.admin-food-editor-content-area'
 
 
-def _patch_pyppeteer():
+
+def patch_pyppeteer():
     from typing import Any
     from pyppeteer import connection, launcher
     import websockets.client
@@ -83,15 +89,48 @@ async def openSearchBox(page):
 
 async def search(page, text_search):
     await page.waitFor(1000)
-    await page.waitForSelector(SRC_INPUT)
-    search_bar = await page.querySelector(SRC_INPUT)
-    button = await page.querySelector(SRC_BTN)
+    await page.waitForSelector(SRC_IMG)
+    img_search_bar = await page.querySelector(SRC_IMG)
+    search_bar = await page.evaluateHandle("el => el.nextElementSibling", img_search_bar)
+    button = await page.evaluateHandle("el => el.parentElement.nextElementSibling.nextElementSibling", search_bar)
+    settings_button = await page.evaluateHandle("el => el.nextElementSibling", button)
+
+    async def p(node):
+        t = await node.getProperty('nodeName')
+        tt = await t.jsonValue()
+        print(tt)
+
 
     # Set source to nccdb
-    settings_button = await page.querySelector(SRC_SETTING_BTN)
     await settings_button.click()
-    await page.waitForSelector(SRC_SETTING_SELECT)
-    await page.select(SRC_SETTING_SELECT, 'NCCDB')
+    select = await page.evaluateHandle('''
+        el => el
+            .parentElement
+            .parentElement
+            .nextElementSibling
+            .firstElementChild
+            .firstElementChild
+            .firstElementChild
+            .firstElementChild
+            .nextElementSibling
+            .firstElementChild
+            .firstElementChild
+            ''', settings_button)
+
+    await page.evaluate('''
+    (element, values) => {
+    const options = Array.from(element.options);
+    element.value = undefined;
+    for (const option of options) {
+        option.selected = values.includes(option.value);
+        if (option.selected && !element.multiple)
+            break;
+    }
+    element.dispatchEvent(new Event('input', { 'bubbles': true }));
+    element.dispatchEvent(new Event('change', { 'bubbles': true }));
+    return options.filter(option => option.selected).map(options => options.value)
+}
+    ''', select, ['NCCDB'])
     
     # Clean input
     await search_bar.click({'clickCount': 3})
@@ -146,57 +185,6 @@ async def removeGold(page):
         await close_button.click()
     except TimeoutError:
         pass
-
-
-async def run_chrome():
-    util._patch_pyppeteer()
-    with open("alim_list_in.txt") as f:
-        alim_flat_in = f.readlines()
-
-    with open("alim_list_in.cache") as f:
-        alim_flat_in_cache = f.readlines()
-
-    browser = await launch(headless=False, args=["--start-maximized"])
-    page = await browser.newPage()
-    await page.setViewport({'width':0, 'height':0});
-
-    await login(page)
-    try:
-        await goToFoodNav(page)
-        await goToFoodSearch(page)
-        await openSearchBox(page)
-
-        for a in alim_flat_in:
-            if a in alim_flat_in_cache:
-                continue
-            
-            try:
-                await search(page, a)
-                await waitForSearchLoading(page)
-                all_results = await getResults(page)
-                await write(all_results, a)
-                await page.waitFor(500)
-            except Exception as e:
-                print("Error for aliment "+a)
-                print(e)
-                continue
-        #await viewResult(page, all_results[0])
-    except TimeoutError:
-        # Probably the gold page lock
-        print("TimeOut Error")
-        raise
-        #await removeGold(page)
-        #raise
-    except NetworkError:
-        # Probably the gold page lock
-        print("Network Error")
-        raise
-        #await removeGold(page)
-        #raise
-
-    breakpoint()
-    
-    await browser.close()
 
 
 def get_all_aliments_in():
@@ -257,10 +245,13 @@ async def consume_aliment_to_search(queue):
 
 
 async def init_page():
-    #browser = await launch(headless=False, args=["--start-maximized"])
-    browser = await launch()
+    params = {'headless': False, 'args': ["--start-maximized"]} if WINDOW else {}
+    browser = await launch(**params)
     page = await browser.newPage()
-    #await page.setViewport({'width':0, 'height':0})
+
+    if WINDOW:
+        await page.setViewport({'width':0, 'height':0})    
+    
     await login(page)
     await goToFoodNav(page)
     return browser, page
@@ -278,9 +269,7 @@ def find_max_aliments(aliments_in):
 
     print(f"Aliments left: {len(stills_alim)}")
 
-    # Start the search process
-    _patch_pyppeteer()
-    
+    # Start the search process    
     if len(stills_alim) > 0:
         loop = asyncio.get_event_loop()
         queue = asyncio.Queue(loop=loop)
@@ -302,16 +291,59 @@ def get_aliments_to_retrieve():
     return results
 
 
-async def test():
-    _patch_pyppeteer()
-    browser = await launch(headless=False, args=["--start-maximized"])
-    page = await browser.newPage()
-    await page.setViewport({'width':0, 'height':0})
-    await login(page)
-    await goToFoodNav(page)
+async def goToAlimentDetail(page):
+    await page.waitForSelector(SRC_TABLE_FIRST_RESULT)
+    element = await page.querySelector(SRC_TABLE_ALL_RESULT)
+    await element.click({'clickCount': 1})
+    await page.waitForSelector(SRC_GOTO_ALIMENT)
+    element = await page.querySelector(SRC_GOTO_ALIMENT)
+    await element.click({'clickCount': 1})
 
-    # Check new page if connected
-    page2 = await browser.newPage()
-    await page2.setViewport({'width':0, 'height':0})
-    await page2.goto(URL_HOME)
-    breakpoint()
+
+async def getRetrieve(page):
+    await page.waitForSelector(GLOBAL_GOOD_DETAIL)
+    await page.waitFor(2000)
+
+
+async def consume_aliment_to_retrieve(queue):
+    def write_to_cache(aliment, result):
+        with open(path.join(HERE, 'cache', 'step2', aliment), "w") as f:
+            json.dump(result, f)
+    
+    browser, page = await init_page()
+    try:
+        await goToFoodSearch(page)
+        while True:
+            await openSearchBox(page)
+            
+            aliment = await queue.get()
+            if aliment is None:
+                break
+
+            print(f"Retrieve aliment: {aliment}")
+
+            await search(page, aliment)
+            await waitForSearchLoading(page)
+            await goToAlimentDetail(page)
+            result = await getRetrieve(page)
+            write_to_cache(aliment, result)
+            await page.waitFor(500)
+            queue.task_done()
+    except Exception as e:
+        print(e)
+
+    await browser.close()
+
+
+def retrieve(aliments_in):
+    alims_in = {x.replace('/', ' ') for x in aliments_in}
+    cached_aliments = set(listdir(path.join(HERE, 'cache', 'step2')))
+    stills_alim = alims_in - cached_aliments
+    print(f"Aliments left to retrieve: {len(stills_alim)}")
+    if len(stills_alim) > 0:
+        loop = asyncio.get_event_loop()
+        queue = asyncio.Queue(loop=loop)
+        producer = produce_aliment_to_search(queue, stills_alim)
+        consumers = [consume_aliment_to_retrieve(queue) for _ in range(NB_PROCESS)]
+        loop.run_until_complete(asyncio.gather(producer, *consumers))
+        loop.close()
