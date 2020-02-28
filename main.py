@@ -12,7 +12,7 @@ def main():
     for a in aliments_to_retrieve:
         if '/' in a:
             slash +=1
-            print(a)
+            #print(a)
 
     print("simple quote: "+str(slash))
 

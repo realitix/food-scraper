@@ -21,8 +21,6 @@ CLOSE_GOLD = 'body > div:nth-child(15) > div > div > div.titlebar > div.titlebar
 FOOD_SEARCH = "//div[text()='Search Foods']"
 FOOD_SRC_BTN = "//button[text()='+ Search Foods']"
 SRC_IMG = "img[src='https://cdn1.cronometer.com/pix/search_magnifier_v2.png']"
-SRC_TABLE_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody'
-SRC_TABLE_FIRST_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody > tr:nth-child(2)'
 SRC_TABLE_ALL_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody > tr:nth-child(n)'
 SRC_TABLE_COL_NAME = 'td:nth-child(1) > div'
 SRC_BTN_VIEW_RESULT = 'body > div.prettydialog > div > div > table > tbody > tr > td:nth-child(2) > button'
@@ -145,7 +143,6 @@ async def search(page, text_search):
     
 
 async def getResults(page):
-    #await page.waitForSelector(SRC_TABLE_FIRST_RESULT)
     elements = await page.querySelectorAll(SRC_TABLE_ALL_RESULT)
     all_names = []
     
@@ -299,8 +296,38 @@ async def goToAlimentDetail(page, aliment_name):
 
 
 async def getRetrieve(page):
+    result = {}
+    def s(short_str):
+        result = ""
+        for short in short_str:
+            if short == "f":
+                result += ".firstElementChild"
+            elif short == "p":
+                result += ".parentElement"
+            elif short == "n":
+                result += ".nextElementSibling"
+            else:
+                raise Exception("Bad short string") 
+        return "el => el"+result
+    
+    await page.waitFor(1000)
     await page.waitForSelector(GLOBAL_GOOD_DETAIL)
-    await page.waitFor(2000)
+    container = await page.querySelector(GLOBAL_GOOD_DETAIL)
+    title = await page.evaluateHandle(s("fnnfn"), container)
+    nutrient_left = await page.querySelector(".admin-nutrient-left")
+    languages = await page.querySelectorAll(".admin-nutrient-left > div:nth-child(1) > div > div > table > tbody > tr:nth-child(n)")
+    rlang = []
+    for l in languages:
+        lang_name = await page.evaluate("el => el.firstElementChild.nextElementSibling.firstElementChild.textContent", l)
+        lang_val = await page.evaluate("el => el.firstElementChild.nextElementSibling.nextElementSibling.nextElementSibling.textContent", l)
+        rlang.append({'lang': lang_name, 'val': lang_val})
+    result['name'] = rlang
+
+    category = await page.querySelector('.admin-nutrient-left > div:nth-child(2) > div > span > select')
+    result['category'] = await page.evaluate('el => el.textContent', category)
+    print(result['category'])
+
+
 
 
 async def consume_aliment_to_retrieve(queue):
@@ -342,7 +369,7 @@ def retrieve(aliments_in):
             alims_in.add(a)
     
     print(f"Aliments left to retrieve: {len(alims_in)}")
-    if len(stills_alim) > 0:
+    if len(alims_in) > 0:
         loop = asyncio.get_event_loop()
         queue = asyncio.Queue(loop=loop)
         producer = produce_aliment_to_search(queue, alims_in)
