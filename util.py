@@ -5,7 +5,6 @@ from os import listdir
 import asyncio
 from pyppeteer import launch
 from pyppeteer.errors import TimeoutError, NetworkError
-import selector as s
 
 HERE = path.dirname(path.abspath(__file__))
 
@@ -22,7 +21,6 @@ CLOSE_GOLD = 'body > div:nth-child(15) > div > div > div.titlebar > div.titlebar
 FOOD_SEARCH = "//div[text()='Search Foods']"
 FOOD_SRC_BTN = "//button[text()='+ Search Foods']"
 SRC_IMG = "img[src='https://cdn1.cronometer.com/pix/search_magnifier_v2.png']"
-SRC_SETTING_SELECT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div:nth-child(2) > table > tbody > tr > td:nth-child(2) > div > select'
 SRC_TABLE_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody'
 SRC_TABLE_FIRST_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody > tr:nth-child(2)'
 SRC_TABLE_ALL_RESULT = 'body > div.prettydialog > div > div > div.GL-TVABCNYB > div.GL-TVABCE-B > div > div > div > table > tbody > tr:nth-child(n)'
@@ -92,7 +90,8 @@ async def search(page, text_search):
     await page.waitForSelector(SRC_IMG)
     img_search_bar = await page.querySelector(SRC_IMG)
     search_bar = await page.evaluateHandle("el => el.nextElementSibling", img_search_bar)
-    button = await page.evaluateHandle("el => el.parentElement.nextElementSibling.nextElementSibling", search_bar)
+    img_loading = await page.evaluateHandle("el => el.parentElement.nextElementSibling", search_bar)
+    button = await page.evaluateHandle("el => el.nextElementSibling", img_loading)
     settings_button = await page.evaluateHandle("el => el.nextElementSibling", button)
 
     async def p(node):
@@ -138,14 +137,11 @@ async def search(page, text_search):
 
     # Start search
     await search_bar.type(text_search)
-    await page.waitFor(1000)
     await button.click()
 
-
-async def waitForSearchLoading(page):
-    await page.waitFor(1000)
-    await page.waitForSelector(SRC_LOADING_IMG)
-    await page.waitForFunction('document.querySelector("'+SRC_LOADING_IMG+'").style.visibility == "hidden"')
+    # Wait
+    await page.waitFor(2000)
+    await page.waitForFunction('el => el.style.visibility == "hidden"', None, img_loading)
     
 
 async def getResults(page):
@@ -209,7 +205,7 @@ def get_all_aliments_in():
 
 async def produce_aliment_to_search(queue, aliments):
     for a in aliments:
-        await queue.put(a)
+        await queue.put(a.strip())
     await queue.put(None)
 
 
@@ -233,7 +229,6 @@ async def consume_aliment_to_search(queue):
             print(f"Search aliment: {aliment}")
 
             await search(page, aliment)
-            await waitForSearchLoading(page)
             all_results = await getResults(page)
             write_to_cache(aliment, all_results)
             await page.waitFor(500)
@@ -291,13 +286,16 @@ def get_aliments_to_retrieve():
     return results
 
 
-async def goToAlimentDetail(page):
-    await page.waitForSelector(SRC_TABLE_FIRST_RESULT)
-    element = await page.querySelector(SRC_TABLE_ALL_RESULT)
-    await element.click({'clickCount': 1})
-    await page.waitForSelector(SRC_GOTO_ALIMENT)
-    element = await page.querySelector(SRC_GOTO_ALIMENT)
-    await element.click({'clickCount': 1})
+async def goToAlimentDetail(page, aliment_name):
+    if "'" in aliment_name:
+        search_name = f'"{aliment_name}"'
+    else:
+        search_name = f"'{aliment_name}'"
+
+    xpath_name = f"//div[text()={search_name}]"
+    await page.waitForXPath(xpath_name)
+    link = await page.xpath(xpath_name)
+    await link[0].click({'clickCount': 2})
 
 
 async def getRetrieve(page):
@@ -307,7 +305,8 @@ async def getRetrieve(page):
 
 async def consume_aliment_to_retrieve(queue):
     def write_to_cache(aliment, result):
-        with open(path.join(HERE, 'cache', 'step2', aliment), "w") as f:
+        a_cleaned = aliment.replace('/', '')
+        with open(path.join(HERE, 'cache', 'step2', a_cleaned), "w") as f:
             json.dump(result, f)
     
     browser, page = await init_page()
@@ -323,8 +322,7 @@ async def consume_aliment_to_retrieve(queue):
             print(f"Retrieve aliment: {aliment}")
 
             await search(page, aliment)
-            await waitForSearchLoading(page)
-            await goToAlimentDetail(page)
+            await goToAlimentDetail(page, aliment)
             result = await getRetrieve(page)
             write_to_cache(aliment, result)
             await page.waitFor(500)
@@ -336,14 +334,18 @@ async def consume_aliment_to_retrieve(queue):
 
 
 def retrieve(aliments_in):
-    alims_in = {x.replace('/', ' ') for x in aliments_in}
+    alims_in = set()
     cached_aliments = set(listdir(path.join(HERE, 'cache', 'step2')))
-    stills_alim = alims_in - cached_aliments
-    print(f"Aliments left to retrieve: {len(stills_alim)}")
+    for a in aliments_in:
+        a_cleaned = a.replace('/', '')
+        if a_cleaned not in cached_aliments:
+            alims_in.add(a)
+    
+    print(f"Aliments left to retrieve: {len(alims_in)}")
     if len(stills_alim) > 0:
         loop = asyncio.get_event_loop()
         queue = asyncio.Queue(loop=loop)
-        producer = produce_aliment_to_search(queue, stills_alim)
+        producer = produce_aliment_to_search(queue, alims_in)
         consumers = [consume_aliment_to_retrieve(queue) for _ in range(NB_PROCESS)]
         loop.run_until_complete(asyncio.gather(producer, *consumers))
         loop.close()
