@@ -5,11 +5,12 @@ from os import listdir
 import asyncio
 from pyppeteer import launch
 from pyppeteer.errors import TimeoutError, NetworkError
+import Levenshtein
 
 HERE = path.dirname(path.abspath(__file__))
 
-NB_PROCESS = 1
-WINDOW = True
+NB_PROCESS = 15
+WINDOW = False
 
 URL_HOME = 'https://cronometer.com'
 URL_LOGIN = 'https://cronometer.com/login/'
@@ -154,20 +155,7 @@ async def getResults(page):
         val = await page.evaluate("el => el.textContent", div)
         if val != "Description":
             all_names.append(val)
-    return all_names
-
-
-async def viewResult(page, result):
-    selector = "//div[text()='"+result+"']"
-    elem = await page.xpath(selector)
-    btn = await page.querySelector(SRC_BTN_VIEW_RESULT)
-    try:
-        await elem[0].click()
-    except IndexError:
-        print("Can't find result "+result)
-        breakpoint()
-        raise
-    await btn.click()
+    return all_names    
 
 
 async def removeGold(page):
@@ -290,9 +278,16 @@ async def goToAlimentDetail(page, aliment_name):
         search_name = f"'{aliment_name}'"
 
     xpath_name = f"//div[text()={search_name}]"
-    await page.waitForXPath(xpath_name)
+    try:
+        await page.waitForXPath(xpath_name)
+    except:
+        # Error, maybe renamed between the two phases
+        print(f"Error with {aliment_name} in ViewResult")
+        return False
+    
     link = await page.xpath(xpath_name)
     await link[0].click({'clickCount': 2})
+    return True
 
 
 async def getRetrieve(page):
@@ -407,9 +402,10 @@ async def consume_aliment_to_retrieve(queue):
             print(f"Retrieve aliment: {aliment}")
 
             await search(page, aliment)
-            await goToAlimentDetail(page, aliment)
-            result = await getRetrieve(page)
-            write_to_cache(aliment, result)
+            ok = await goToAlimentDetail(page, aliment)
+            if ok:
+                result = await getRetrieve(page)
+                write_to_cache(aliment, result)
             await page.waitFor(500)
             queue.task_done()
     except Exception as e:
