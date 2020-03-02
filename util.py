@@ -311,11 +311,14 @@ async def getRetrieve(page):
         return "el => el"+result
     
     await page.waitFor(1000)
-    await page.waitForSelector(GLOBAL_GOOD_DETAIL)
-    container = await page.querySelector(GLOBAL_GOOD_DETAIL)
-    title = await page.evaluateHandle(s("fnnfn"), container)
-    nutrient_left = await page.querySelector(".admin-nutrient-left")
-    languages = await page.querySelectorAll(".admin-nutrient-left > div:nth-child(1) > div > div > table > tbody > tr:nth-child(n)")
+
+    container_selector = '#cronometerApp > div:nth-child(2) > div:nth-child(3) > div > div > table > tbody > tr:nth-child(2) > td > div > div:nth-child(4) > div > div > div.admin-food-editor-content-area'
+    await page.waitForSelector(container_selector)
+    container = await page.querySelector(container_selector)
+    
+    result['title'] = await page.evaluate("c => c.querySelector('div:nth-child(3) > div.admin-food-name').textContent", container)
+    result['id'] = await page.evaluate("c => c.querySelector('div:nth-child(4) > div > div:nth-child(1)').textContent", container)
+    languages = await container.querySelectorAll(".admin-nutrient-left > div:nth-child(1) > div > div > table > tbody > tr:nth-child(n)")
     rlang = []
     for l in languages:
         lang_name = await page.evaluate("el => el.firstElementChild.nextElementSibling.firstElementChild.textContent", l)
@@ -323,11 +326,66 @@ async def getRetrieve(page):
         rlang.append({'lang': lang_name, 'val': lang_val})
     result['name'] = rlang
 
-    category = await page.querySelector('.admin-nutrient-left > div:nth-child(2) > div > span > select')
-    result['category'] = await page.evaluate('el => el.textContent', category)
-    print(result['category'])
+    result['category'] = await page.evaluate("c => c.querySelector('.admin-nutrient-left > div:nth-child(2) > div > span > select').value", container)
+    measures = await container.querySelectorAll('.admin-nutrient-left > div:nth-child(5) > div > table > tbody > tr > td > table > tbody > tr:nth-child(n+2)')
+    rmeasures = []
+    for m in measures:
+        measure_name = await page.evaluate("el => el.firstElementChild.nextElementSibling.firstElementChild.textContent", m)
+        measure_val = await page.evaluate("el => el.firstElementChild.nextElementSibling.nextElementSibling.firstElementChild.textContent", m)
+        rmeasures.append({'name': measure_name, 'value': measure_val})
+    result['measures'] = rmeasures
 
+    # Set nutrients for 100g
+    gram_input = await container.querySelector('div:nth-child(9) > div > div > div:nth-child(1) > input')
+    gram_select = await container.querySelector('div:nth-child(9) > div > div > div:nth-child(1) > select')
 
+    await gram_input.click({'clickCount': 3})
+    await gram_input.type("");
+    await gram_input.type("100");
+    await page.evaluate('''
+        (element, values) => 
+    {
+        const options = Array.from(element.options);
+        element.value = undefined;
+        for (const option of options) {
+            option.selected = values.includes(option.value);
+            if (option.selected && !element.multiple)
+                break;
+        }
+        element.dispatchEvent(new Event('input', { 'bubbles': true }));
+        element.dispatchEvent(new Event('change', { 'bubbles': true }));
+        return options.filter(option => option.selected).map(options => options.value)
+    }
+    ''', gram_select, ['g'])
+    await page.waitFor(200)
+
+    async def get_table_nutrients(table_element):
+        nutrient_elems = await table_element.querySelectorAll('tbody > tr:nth-child(n+2)')
+        results = []
+        for e in nutrient_elems:
+            nutrient_name = await page.evaluate('el => el.firstElementChild.firstElementChild.textContent', e)
+            nutrient_value = await page.evaluate('el => el.firstElementChild.nextElementSibling.firstElementChild.textContent', e)
+            nutrient_unit = await page.evaluate('el => el.firstElementChild.nextElementSibling.nextElementSibling.firstElementChild.textContent', e)
+            results.append({'name': nutrient_name.strip(), 'value': nutrient_value, 'unit': nutrient_unit})
+        return results
+
+    # Get general nutrients
+    tables = {
+        'general'      : 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(1) > tbody > tr > td > table',
+        'carbohydrates': 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(2) > tbody > tr > td > table',
+        'lipids'       : 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(3) > tbody > tr > td > table',
+        'proteins'     : 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(4) > tbody > tr > td > table',
+        'vitamins'     : 'div.admin-nutrient-tables > div:nth-child(2) > div > table:nth-child(1) > tbody > tr > td > table',
+        'minerals'     : 'div.admin-nutrient-tables > div:nth-child(2) > div > table:nth-child(2) > tbody > tr > td > table'
+    }
+
+    result['nutrition'] = {}
+    for key, val in tables.items():
+        t = await container.querySelector(val)
+        r = await get_table_nutrients(t)
+        result['nutrition'][key] = r
+        
+    return result
 
 
 async def consume_aliment_to_retrieve(queue):
@@ -361,6 +419,7 @@ async def consume_aliment_to_retrieve(queue):
 
 
 def retrieve(aliments_in):
+    aliments_in = [x.strip() for x in aliments_in]
     alims_in = set()
     cached_aliments = set(listdir(path.join(HERE, 'cache', 'step2')))
     for a in aliments_in:
