@@ -1,7 +1,9 @@
 import xmltodict
+import traceback
 import json
 from os import path
 from os import listdir
+import signal, psutil, os
 import asyncio
 from pyppeteer import launch
 from pyppeteer.errors import TimeoutError, NetworkError
@@ -9,7 +11,7 @@ import Levenshtein
 
 HERE = path.dirname(path.abspath(__file__))
 
-NB_PROCESS = 15
+NB_PROCESS = 5
 WINDOW = False
 
 URL_HOME = 'https://cronometer.com'
@@ -30,7 +32,6 @@ SRC_GOTO_ALIMENT = 'body > div.prettydialog > div > div > table > tbody > tr > t
 
 # Food detail
 GLOBAL_GOOD_DETAIL = '.admin-food-editor-content-area'
-
 
 
 def patch_pyppeteer():
@@ -81,7 +82,11 @@ async def goToFoodSearch(page):
 async def openSearchBox(page):
     await page.waitForXPath(FOOD_SRC_BTN)
     link = await page.xpath(FOOD_SRC_BTN)
-    await link[0].click()
+    try:
+        await link[0].click()
+    except:
+        print("Can't open SearchBox, retrying...")
+        await openSearchBox(page)
 
 
 async def search(page, text_search):
@@ -140,22 +145,7 @@ async def search(page, text_search):
 
     # Wait
     await page.waitFor(2000)
-    await page.waitForFunction('el => el.style.visibility == "hidden"', None, img_loading)
-    
-
-async def getResults(page):
-    elements = await page.querySelectorAll(SRC_TABLE_ALL_RESULT)
-    all_names = []
-    
-    if len(elements) == 1:
-        return all_names
-    
-    for e in elements:
-        div = await e.querySelector(SRC_TABLE_COL_NAME)
-        val = await page.evaluate("el => el.textContent", div)
-        if val != "Description":
-            all_names.append(val)
-    return all_names    
+    await page.waitForFunction('el => el.style.visibility == "hidden"', None, img_loading)  
 
 
 async def removeGold(page):
@@ -168,266 +158,26 @@ async def removeGold(page):
         pass
 
 
-def get_all_aliments_in():
-    '''Get all aliments before asking'''
-    def add_result(result, a):
-        result.add(a)
-        for x in (',', '('):
-            result.add(a.split(x)[0])
-
-    alims = {}
-    with open(path.join(HERE, "aliment_list.xml"), 'rb') as f:
-        r = f.read()
-        alims.update(xmltodict.parse(r)['TABLE'])
-
-    result = set()
-    for a in alims['ALIM']:
-        add_result(result, a['alim_nom_eng'])
-        add_result(result, a['alim_nom_index_eng'])
-
-    return result
-
-
 async def produce_aliment_to_search(queue, aliments):
     for a in aliments:
         await queue.put(a.strip())
-    await queue.put(None)
 
 
-async def consume_aliment_to_search(queue):
-    def write_to_cache(aliment, results):
-        with open(path.join(HERE, 'cache', 'step1', aliment), "w") as f:
-            for r in results:
-                f.write(r)
-                f.write('\n')
-
-    browser, page = await init_page()
-    try:
-        await goToFoodSearch(page)
-        await openSearchBox(page)
-
-        while True:
-            aliment = await queue.get()
-            if aliment is None:
-                break
-
-            print(f"Search aliment: {aliment}")
-
-            await search(page, aliment)
-            all_results = await getResults(page)
-            write_to_cache(aliment, all_results)
-            await page.waitFor(500)
-            queue.task_done()
-    except Exception as e:
-        print(e)
-
-    await browser.close()
-
-
-async def init_page():
+async def init_browser():
     params = {'headless': False, 'args': ["--start-maximized"]} if WINDOW else {}
     browser = await launch(**params)
-    page = await browser.newPage()
-
-    if WINDOW:
-        await page.setViewport({'width':0, 'height':0})    
+    page = await browser.newPage() 
     
     await login(page)
     await goToFoodNav(page)
-    return browser, page
+    await page.close()
+    return browser
 
 
-def find_max_aliments(aliments_in):
-    '''Find the maximum of aliment by using
-    web browser to search for others aliments'''
-    # Remove forbidden / char
-    alims_in = {x.replace('/', ' ') for x in aliments_in}
-
-    # Remove all aliment ever in the cache (step1)
-    cached_aliments = set(listdir(path.join(HERE, 'cache', 'step1')))
-    stills_alim = alims_in - cached_aliments
-
-    print(f"Aliments left: {len(stills_alim)}")
-
-    # Start the search process    
-    if len(stills_alim) > 0:
-        loop = asyncio.get_event_loop()
-        queue = asyncio.Queue(loop=loop)
-        producer = produce_aliment_to_search(queue, stills_alim)
-        consumers = [consume_aliment_to_search(queue) for _ in range(NB_PROCESS)]
-        loop.run_until_complete(asyncio.gather(producer, *consumers))
-        loop.close()
-    
-
-def get_aliments_to_retrieve():
-    aliments_src = listdir(path.join(HERE, 'cache', 'step1'))
-    results = set()
-    for a in aliments_src:
-        with open(path.join(HERE, 'cache', 'step1', a), "r") as f:
-            for l in f.readlines():
-                results.add(l)
-
-    print(f"{len(results)} aliments to retrieve")
-    return results
-
-
-async def goToAlimentDetail(page, aliment_name):
-    if "'" in aliment_name:
-        search_name = f'"{aliment_name}"'
-    else:
-        search_name = f"'{aliment_name}'"
-
-    xpath_name = f"//div[text()={search_name}]"
-    try:
-        await page.waitForXPath(xpath_name)
-    except:
-        # Error, maybe renamed between the two phases
-        print(f"Error with {aliment_name} in ViewResult")
-        return False
-    
-    link = await page.xpath(xpath_name)
-    await link[0].click({'clickCount': 2})
-    return True
-
-
-async def getRetrieve(page):
-    result = {}
-    def s(short_str):
-        result = ""
-        for short in short_str:
-            if short == "f":
-                result += ".firstElementChild"
-            elif short == "p":
-                result += ".parentElement"
-            elif short == "n":
-                result += ".nextElementSibling"
-            else:
-                raise Exception("Bad short string") 
-        return "el => el"+result
-    
-    await page.waitFor(1000)
-
-    container_selector = '#cronometerApp > div:nth-child(2) > div:nth-child(3) > div > div > table > tbody > tr:nth-child(2) > td > div > div:nth-child(4) > div > div > div.admin-food-editor-content-area'
-    await page.waitForSelector(container_selector)
-    container = await page.querySelector(container_selector)
-    
-    result['title'] = await page.evaluate("c => c.querySelector('div:nth-child(3) > div.admin-food-name').textContent", container)
-    result['id'] = await page.evaluate("c => c.querySelector('div:nth-child(4) > div > div:nth-child(1)').textContent", container)
-    languages = await container.querySelectorAll(".admin-nutrient-left > div:nth-child(1) > div > div > table > tbody > tr:nth-child(n)")
-    rlang = []
-    for l in languages:
-        lang_name = await page.evaluate("el => el.firstElementChild.nextElementSibling.firstElementChild.textContent", l)
-        lang_val = await page.evaluate("el => el.firstElementChild.nextElementSibling.nextElementSibling.nextElementSibling.textContent", l)
-        rlang.append({'lang': lang_name, 'val': lang_val})
-    result['name'] = rlang
-
-    result['category'] = await page.evaluate("c => c.querySelector('.admin-nutrient-left > div:nth-child(2) > div > span > select').value", container)
-    measures = await container.querySelectorAll('.admin-nutrient-left > div:nth-child(5) > div > table > tbody > tr > td > table > tbody > tr:nth-child(n+2)')
-    rmeasures = []
-    for m in measures:
-        measure_name = await page.evaluate("el => el.firstElementChild.nextElementSibling.firstElementChild.textContent", m)
-        measure_val = await page.evaluate("el => el.firstElementChild.nextElementSibling.nextElementSibling.firstElementChild.textContent", m)
-        rmeasures.append({'name': measure_name, 'value': measure_val})
-    result['measures'] = rmeasures
-
-    # Set nutrients for 100g
-    gram_input = await container.querySelector('div:nth-child(9) > div > div > div:nth-child(1) > input')
-    gram_select = await container.querySelector('div:nth-child(9) > div > div > div:nth-child(1) > select')
-
-    await gram_input.click({'clickCount': 3})
-    await gram_input.type("");
-    await gram_input.type("100");
-    await page.evaluate('''
-        (element, values) => 
-    {
-        const options = Array.from(element.options);
-        element.value = undefined;
-        for (const option of options) {
-            option.selected = values.includes(option.value);
-            if (option.selected && !element.multiple)
-                break;
-        }
-        element.dispatchEvent(new Event('input', { 'bubbles': true }));
-        element.dispatchEvent(new Event('change', { 'bubbles': true }));
-        return options.filter(option => option.selected).map(options => options.value)
-    }
-    ''', gram_select, ['g'])
-    await page.waitFor(200)
-
-    async def get_table_nutrients(table_element):
-        nutrient_elems = await table_element.querySelectorAll('tbody > tr:nth-child(n+2)')
-        results = []
-        for e in nutrient_elems:
-            nutrient_name = await page.evaluate('el => el.firstElementChild.firstElementChild.textContent', e)
-            nutrient_value = await page.evaluate('el => el.firstElementChild.nextElementSibling.firstElementChild.textContent', e)
-            nutrient_unit = await page.evaluate('el => el.firstElementChild.nextElementSibling.nextElementSibling.firstElementChild.textContent', e)
-            results.append({'name': nutrient_name.strip(), 'value': nutrient_value, 'unit': nutrient_unit})
-        return results
-
-    # Get general nutrients
-    tables = {
-        'general'      : 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(1) > tbody > tr > td > table',
-        'carbohydrates': 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(2) > tbody > tr > td > table',
-        'lipids'       : 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(3) > tbody > tr > td > table',
-        'proteins'     : 'div.admin-nutrient-tables > div:nth-child(1) > div > table:nth-child(4) > tbody > tr > td > table',
-        'vitamins'     : 'div.admin-nutrient-tables > div:nth-child(2) > div > table:nth-child(1) > tbody > tr > td > table',
-        'minerals'     : 'div.admin-nutrient-tables > div:nth-child(2) > div > table:nth-child(2) > tbody > tr > td > table'
-    }
-
-    result['nutrition'] = {}
-    for key, val in tables.items():
-        t = await container.querySelector(val)
-        r = await get_table_nutrients(t)
-        result['nutrition'][key] = r
-        
-    return result
-
-
-async def consume_aliment_to_retrieve(queue):
-    def write_to_cache(aliment, result):
-        a_cleaned = aliment.replace('/', '')
-        with open(path.join(HERE, 'cache', 'step2', a_cleaned), "w") as f:
-            json.dump(result, f)
-    
-    browser, page = await init_page()
-    try:
-        await goToFoodSearch(page)
-        while True:
-            await openSearchBox(page)
-            
-            aliment = await queue.get()
-            if aliment is None:
-                break
-
-            print(f"Retrieve aliment: {aliment}")
-
-            await search(page, aliment)
-            ok = await goToAlimentDetail(page, aliment)
-            if ok:
-                result = await getRetrieve(page)
-                write_to_cache(aliment, result)
-            await page.waitFor(500)
-            queue.task_done()
-    except Exception as e:
-        print(e)
-
-    await browser.close()
-
-
-def retrieve(aliments_in):
-    aliments_in = [x.strip() for x in aliments_in]
-    alims_in = set()
-    cached_aliments = set(listdir(path.join(HERE, 'cache', 'step2')))
-    for a in aliments_in:
-        a_cleaned = a.replace('/', '')
-        if a_cleaned not in cached_aliments:
-            alims_in.add(a)
-    
-    print(f"Aliments left to retrieve: {len(alims_in)}")
-    if len(alims_in) > 0:
-        loop = asyncio.get_event_loop()
-        queue = asyncio.Queue(loop=loop)
-        producer = produce_aliment_to_search(queue, alims_in)
-        consumers = [consume_aliment_to_retrieve(queue) for _ in range(NB_PROCESS)]
-        loop.run_until_complete(asyncio.gather(producer, *consumers))
-        loop.close()
+async def init_page(browser):
+    page = await browser.newPage()
+    if WINDOW:
+        await page.setViewport({'width':0, 'height':0})
+    await page.goto(URL_HOME)  
+    await goToFoodNav(page)
+    return page
