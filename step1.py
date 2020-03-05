@@ -71,9 +71,10 @@ def get_all_aliments_in():
     return result
 
 
-async def find_max_aliments(aliments_in, browser):
+async def run(browser):
     '''Find the maximum of aliment by using
     web browser to search for others aliments'''
+    aliments_in = get_all_aliments_in()
     # Remove forbidden / char
     alims_in = {x.replace('/', ' ') for x in aliments_in}
 

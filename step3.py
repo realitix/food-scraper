@@ -29,7 +29,7 @@ def get_full_name(lang):
                     return x['lang']
 
 
-def traduce_all_aliments():
+def run():
     aliments_in = set(listdir(path.join(HERE, 'cache', 'step2')))
     aliments_in = aliments_in - set(['non-existent'])
     alims_in = set()
@@ -38,7 +38,7 @@ def traduce_all_aliments():
     translator = Translator()
 
 
-    # First traduce from en to fr
+    # First load traduction cache
     try:
         with open(path.join(HERE, 'cache', 'step3', 'traductions'), "r") as f:
             content = json.load(f)
@@ -88,11 +88,14 @@ def traduce_all_aliments():
             content = json.load(f)
             add_to_content = []
             for x in content['name']:
+                # Embedded lang are better so rank 1
+                x['rank'] = 1
+
                 if x['lang'].lower().startswith('en'):
-                    add_to_content.append({full_name_fr: en_to_fr[x['val']]})
+                    add_to_content.append({'lang': full_name_fr, 'val': en_to_fr[x['val']], 'rank': 2})
 
                 if x['lang'].lower().startswith('fr'):
-                    add_to_content.append({full_name_en: fr_to_en[x['val']]})
+                    add_to_content.append({'lang': full_name_en, 'val': fr_to_en[x['val']], 'rank': 2})
             content['name'].extend(add_to_content)
             
             with open(path.join(HERE, 'cache', 'step3', a), 'w') as f:

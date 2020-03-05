@@ -8,6 +8,7 @@ import asyncio
 from pyppeteer import launch
 from pyppeteer.errors import TimeoutError, NetworkError
 import Levenshtein
+import time
 
 HERE = path.dirname(path.abspath(__file__))
 
@@ -32,6 +33,15 @@ SRC_GOTO_ALIMENT = 'body > div.prettydialog > div > div > table > tbody > tr > t
 
 # Food detail
 GLOBAL_GOOD_DETAIL = '.admin-food-editor-content-area'
+
+global_timestamp = 0
+
+
+def get_timestamp():
+    global global_timestamp
+    if not global_timestamp:
+        global_timestamp = int(time.time())
+    return global_timestamp
 
 
 def patch_pyppeteer():

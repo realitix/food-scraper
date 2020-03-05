@@ -180,8 +180,8 @@ def get_aliments_to_retrieve():
     return results
 
 
-async def retrieve(aliments_in, browser):
-    aliments_in = [x.strip() for x in aliments_in]
+async def run(browser):
+    aliments_in = [x.strip() for x in get_aliments_to_retrieve()]
     alims_in = set()
     cached_aliments = set(listdir(path.join(HERE, 'cache', 'step2')))
     for a in aliments_in:

@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 import asyncio
 from util import init_browser, patch_pyppeteer
-from step1 import get_all_aliments_in, find_max_aliments
-from step2 import get_aliments_to_retrieve, retrieve
-from step3 import traduce_all_aliments
+import step1, step2, step3, step4, step5
 
 
 
@@ -16,17 +14,23 @@ async def main():
 
     print("-------------------------")
     print("Task 1 - Search aliments")
-    list_aliment_in = get_all_aliments_in()
-    await find_max_aliments(list_aliment_in, browser)
+    await step1.run(browser)
 
     print("-------------------------")
     print("Task 2 - Get aliment detail")
-    aliments_to_retrieve = get_aliments_to_retrieve()
-    await retrieve(aliments_to_retrieve, browser)
+    await step2.run(browser)
 
     print("-------------------------")
-    print("Task 3 - Traduce")
-    traduce_all_aliments()
+    print("Task 3 - Traduce all aliments")
+    step3.run()
+
+    print("-------------------------")
+    print("Task 4 - Generate the final json")
+    step4.run()
+
+    print("-------------------------")
+    print("Task 5 - Compress Json File")
+    step5.run()
 
     
     
