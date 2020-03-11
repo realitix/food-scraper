@@ -55,4 +55,20 @@ def run():
     with open(path.join(HERE, 'cache', 'step4', 'out.json'), 'w') as f:
         json.dump(result, f)
 
+    # For references
+    # Write category list, unit list, nutrient list
+    result2 = {'units': [], 'categories': [], 'nutrients': []}
+    for a in result['aliments']:
+        if a['category'] not in result2['categories']:
+            result2['categories'].append(a['category'])
+        for m in a['measures']:
+            if m[0] not in result2['units']:
+                result2['units'].append(m[0])
+        for n in a['nutritions']:
+            if n['name'] not in result2['nutrients']:
+                result2['nutrients'].append(n['name'])
+            
+    with open(path.join(HERE, 'cache', 'step4', 'references.json'), 'w') as f:
+        json.dump(result2, f, indent=4, sort_keys=True)
+
 
