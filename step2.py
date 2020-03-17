@@ -49,7 +49,7 @@ async def getRetrieve(page):
 
     await gram_input.click({'clickCount': 3})
     await gram_input.type("");
-    await gram_input.type("100");
+    await gram_input.type("1000");
     await page.evaluate('''
         (element, values) => 
     {
@@ -74,7 +74,15 @@ async def getRetrieve(page):
             nutrient_name = await page.evaluate('el => el.firstElementChild.firstElementChild.textContent', e)
             nutrient_value = await page.evaluate('el => el.firstElementChild.nextElementSibling.firstElementChild.textContent', e)
             nutrient_unit = await page.evaluate('el => el.firstElementChild.nextElementSibling.nextElementSibling.firstElementChild.textContent', e)
-            results.append({'name': nutrient_name.strip(), 'value': nutrient_value, 'unit': nutrient_unit})
+            r = dict()
+            r['name'] = nutrient_name.strip()
+            r['unit'] = nutrient_unit
+            try:
+                r['value'] = float(nutrient_value)/10
+            except ValueError:
+                r['value'] = 0.0
+
+            results.append(r)
         return results
 
     # Get general nutrients
@@ -161,6 +169,17 @@ async def consume_aliment_to_retrieve(queue, browser):
             queue.task_done()
 
     await page.close()
+
+
+async def get_nutrients(browser, aliment):
+    page = await init_page(browser)
+    await goToFoodSearch(page)
+    await openSearchBox(page)
+    await search(page, aliment)
+    await goToAlimentDetail(page, aliment)
+    result = await getRetrieve(page)
+    await page.close()
+    return result
 
 
 def get_aliments_to_retrieve():
